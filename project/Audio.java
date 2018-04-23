@@ -16,7 +16,7 @@ public class Audio{
     private static final boolean BIG_ENDIAN = false;
     private static final double MAX_16_BIT = Short.MAX_VALUE;     // 32,767
     private static final int SAMPLE_RATE = 48000;                 // CD-quality audio
-    private static final int SAMPLE_BUFFER_SIZE =10000;
+    private static final int SAMPLE_BUFFER_SIZE =20000;
     private static final int OUTPUT_BUFFER_SIZE=1024;
 
     private static int bufferCounter = 0;
@@ -66,11 +66,48 @@ public class Audio{
     }
 
     //read in as much as possible, up to SAMPLE_BUFFER_SIZE
-    public static SoundInfo read(){
+    public static double[][] read(){
 
+	System.out.print("TGT:" + tgtLine.available());
 	//makes use of existing buffer
 	int cnt = tgtLine.read(buffer, 0, buffer.length < tgtLine.available() ? buffer.length : tgtLine.available());
-	return new SoundInfo(buffer, cnt);
+	System.out.println( ", Read: " + cnt);
+	int bits = getAudioFormat().getSampleSizeInBits();
+	if(bits !=  BITS_PER_SAMPLE){
+	    throw new RuntimeException("Invalid bit rate. Expected " + BITS_PER_SAMPLE +", found " + bits);
+	}
+	
+	//code below from https://stackoverflow.com/questions/29560491/fourier-transforming-a-byte-array
+	double max = Math.pow(2, bits - 1);
+	ByteBuffer bb = ByteBuffer.wrap(buffer);
+	bb.order(getAudioFormat().isBigEndian() ?
+		 ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN);
+
+	double[] samples = new double[cnt * 8 / bits];
+	// convert sample-by-sample to a scale of
+	// -1.0 <= samples[i] < 1.0
+
+	
+	for(int i = 0; i < samples.length; ++i) {
+	    samples[i] = ( bb.getShort() / max );
+	}
+
+	double[][] out;
+	//if stereo, then left/right alternate samples
+	if(getAudioFormat().getChannels()==2){
+	    out= new double[2][samples.length/2];
+	}else{
+	    out= new double[2][samples.length];
+	}
+	int j=0;
+	for(int i =0; i < samples.length; i++, j++){
+	    out[0][j]=samples[i];
+	    if(getAudioFormat().getChannels()==2){
+		i++;
+	    }
+	    out[1][j]=samples[i];
+	}
+	return out;
     }
     
     public static void  write( byte[] in, int count){
@@ -96,6 +133,9 @@ public class Audio{
     //operates on it's own thread
     public static void  write( double[] inLeft, double[] inRight, int count){
 	try{
+	    if(srcLine.available() > 10000){
+		System.out.println(srcLine.available());
+	    }
 	    writeMutex.acquire(); //grab the right to write to the sound card
 	    new Thread()
 	    {
@@ -298,6 +338,7 @@ public class Audio{
 	    tgtLine.close();
 	    srcLine.drain();
 	    srcLine.close();
+
 	}catch(Exception ex){
 	    System.out.println(ex);
 	    return 1;
@@ -307,27 +348,18 @@ public class Audio{
 
     //test out the fft
     public static void fftTest(){
-	double[] input = new double[]{
-	    0.0176,
-	    -0.0620,
-	    0.2467,
-	    0.4599,
-	    -0.0582,
-	    0.4694,
-	    0.0001,
-	    // -0.2873,
-	    0.1322
-	};
+	double[] input = {0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,0};
+	
         DoubleFFT_1D fftDo = new DoubleFFT_1D(input.length);
         double[] fft = new double[input.length];
 	double[] fft2 = new double[input.length*2];
         System.arraycopy(input, 0, fft2, 0, input.length);
       
 	
-	fftDo.realForwardFull(fft2);
+	/*fftDo.realForwardFull(fft2);
 	for(double d: fft2) {
             System.out.println(d);
-        }
+	    }*/
 	System.arraycopy(input, 0, fft, 0, input.length);
 	fftDo.realForward(fft);
 	System.out.println("------------------");
@@ -335,14 +367,16 @@ public class Audio{
             System.out.println(d);
         }
 
-	fftDo.realInverse(fft, true);
+	fftDo.realInverse(fft, false);
 	System.out.println("------------------");
         for(double d: fft) {
             System.out.println(d);
         }
 
     }
-    
+    public static void main(String[] args){
+	fftTest();
+    }
   
 }
 
