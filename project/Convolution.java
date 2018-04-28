@@ -11,7 +11,7 @@ public class Convolution{
     private double[] overlap;
     private int fftLen;
     private int lastOverlap;
-    
+    double[] fftIn;
     
     public Convolution(double[] impulse){
 	this(impulse, impulse.length*2-1);
@@ -29,13 +29,16 @@ public class Convolution{
 	fft.realForward(impulse);
 	//yeilds fft with fftLen/2 real and fftlen/2 imag
 
+	fftIn= new double[fftLen];
+
 	
     }
 
+
     
     public double[] convolve(double[] input, int start, int len){
-	double[] fftIn = new double[fftLen];
-
+	Arrays.fill(fftIn, 0);
+	//System.out.println("Start: " + start + ", len: " + len + ", size: " + input.length);
 	System.arraycopy(input, start, fftIn, 0, len);
 	fft.realForward(fftIn);
 	

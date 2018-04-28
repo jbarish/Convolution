@@ -189,6 +189,73 @@ public class Audio{
     }
 
 
+
+
+    //write an array of doubles to the sound card, in stereo format
+    //operates on it's own thread
+    public static void  write( List<double[]> lefts, List<double[]> rights, int count){
+	try{
+	    if(srcLine.available() > 10000){
+		System.out.println(srcLine.available());
+	    }
+	    writeMutex.acquire(); //grab the right to write to the sound card
+	    new Thread()
+	    {
+		public void run() {
+		    for(int j = 0; j < lefts.size(); j++){
+			double[] inLeft = lefts.get(j);
+			double[] inRight = lefts.get(j);
+			for(int i = 0; i < count; i++){
+
+			    //clamp all samples to -1 to 1
+			    if(inLeft[i] > 1){
+				inLeft[i] =1;
+			    }
+			    if(inLeft[i] < -1){
+				inLeft[i] = -1;
+			    }
+
+			    //if stereo, also clamp right channel
+			    if(inRight != null){
+				if(inRight[i] > 1){
+				    inRight[i] =1;
+				}
+				if(inRight[i] < -1){
+				    inRight[i] = -1;
+				}
+			    }
+
+			    //convert to bytes and write out
+			    short s = (short) (MAX_16_BIT*inLeft[i]);
+			    byte b = (byte)s;
+			    write(b);
+			    b= (byte) (s >> 8);
+			    write(b);
+			
+			    if(inRight != null){
+				s = (short) (MAX_16_BIT*inRight[i]);
+				b = (byte)s;
+				write(b);
+				b= (byte) (s >> 8);
+				write(b);
+			    }
+			
+			}
+			
+		    }
+		    writeMutex.release(); //release the sound card
+		    return;
+		}
+	    }.start();
+	    
+	}
+	catch (InterruptedException ie){
+	    ie.printStackTrace();
+	}
+	
+    }
+
+
     //write a double to sound card
     public static void write(double d){
 
@@ -231,6 +298,7 @@ public class Audio{
 
     //playback loop
     public static void echo(){
+	Audio.init();
 	int a = 0;
 	while (true){
 	   	    

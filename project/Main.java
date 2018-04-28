@@ -1,5 +1,5 @@
 package project;
-
+import java.util.*;
 import java.util.concurrent.*;
 public class Main{
 
@@ -50,6 +50,9 @@ public class Main{
 	  
 	    final int index = i;
 	    try{
+
+	
+		
 		writeMutex.acquire();
 		new Thread()
 		{
@@ -92,16 +95,19 @@ public class Main{
 
     }
 
+
+
+    
     public static void runLive(String[] args){
 	Audio.init();
 
 	int sampleConvolveLenNF= 5000;//impulse[0].length;
-
+	final int NUM_THREADS = 8; //should be datasize/sampleLen *2 (for stereo)
 	String imp;
 	if(args.length==0){
 	    imp = "./ab_c.wav";
 	}else{
-	    imp=args[1];
+	    imp=args[0];
 	}
 
 	
@@ -114,18 +120,77 @@ public class Main{
 
 
 	System.out.println("Using a convolution length of " + sampleConvolveLen);
-	
-	Convolution cLeft = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1);
-	Convolution cRight = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1);
+
+	//create an array of all convolving objects
+	Convolution convolvers[] = new Convolution[NUM_THREADS];
+	for(int i = 0; i < NUM_THREADS; i+=2){
+	    convolvers[i] = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1);
+	    convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1);
+	}
 	
 
+	//create our executor
+	ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
+	double[][] leftOver = null;
+	    
 	while (true){
 	    
-	    final double[][] d = Audio.read();
-	    final int len = d[0].length;
-	   
-	  
+	    double[][] d = Audio.read();
+	     int len = d[0].length;
+	    List<double[]> lefts = new ArrayList<double[]>();
+	    List<double[]> rights = new ArrayList<double[]>();
+
+	    //add in leftovers from last time
+	    if(leftOver != null){
+		double[][]d1 = new double[2][len+leftOver[0].length];
+	        d1[0] = Arrays.copyOf(leftOver[0], len+leftOver[0].length);
+		d1[1] = Arrays.copyOf(leftOver[1], len+leftOver[1].length);
+		System.arraycopy(d[0],0,d1[0], leftOver[0].length, len);
+		System.arraycopy(d[1],0,d1[1], leftOver[1].length, len);
+		d = d1;
+		len = d[0].length; //reset since it was updated
+	    }
+
+	    
 	    try{
+		
+		List<convolver> threads = new ArrayList<convolver>();
+		List<Future<double[]>> results = null;
+		int numThreadsNeeded = ((int)(len/sampleConvolveLen))*2;//*2 for stereo
+
+		//save left over for next time (things not even multiple of sampleConvolveLen
+		if(len%sampleConvolveLen != 0){
+		    leftOver = new double[2][len%sampleConvolveLen];
+		    System.arraycopy(d[0],sampleConvolveLen*(numThreadsNeeded/2),
+				     leftOver[0], 0, len%sampleConvolveLen);
+		    System.arraycopy(d[1],sampleConvolveLen*(numThreadsNeeded/2),
+				     leftOver[1], 0, len%sampleConvolveLen);
+		    
+	
+		}else{
+		    leftOver = null;
+		}
+		/*create all of our threads */
+		for(int i = 0; i < numThreadsNeeded; i+=2){
+		    threads.add(new convolver(d[0], convolvers[i],sampleConvolveLen*(i/2), sampleConvolveLen));
+		    threads.add(new convolver(d[1], convolvers[i+1],sampleConvolveLen*(i/2), sampleConvolveLen));
+		}
+		/*run our convolution in parallel */
+		results = executor.invokeAll(threads);
+		/*get the results from all of the runs */
+		int i = 0;
+		for(Future<double[]> f : results){
+		    if(i%2==0){
+			lefts.add(f.get());
+		    }else{
+			rights.add(f.get());
+		    }
+		    i++;
+		}
+		/*write it to the sound card */
+		Audio.write(lefts, rights, sampleConvolveLen);
+
+		/*
 	    writeMutex.acquire();
 	     new Thread()
 	     {
@@ -147,10 +212,12 @@ public class Main{
 	      writeMutex.acquire();
 	      Audio.write(convolvedLeft,convolvedRight, sampleConvolveLen);
 	      writeMutex.release();
-	      writeMutex.release();
-	    }catch (InterruptedException ie){
-		  ie.printStackTrace();
-	      }
+	      writeMutex.release();*/
+	    }catch (InterruptedException ie ){
+		ie.printStackTrace();
+	    }catch(ExecutionException ex){
+		ex.printStackTrace();
+	    }
 	    
 	}
 	    
@@ -163,8 +230,26 @@ public class Main{
     public static void main (String [] args){
 	//	runFromFile(args);
 	runLive(args);
+	Audio.echo();
 
     }
 
+
+}
+
+class convolver implements Callable<double[]>{
+    double data[];
+    Convolution c;
+    int start;
+    int len;
+    public convolver(double[] data, Convolution c, int start, int len){
+	this.data = data;
+	this.c = c;
+	this.start = start;
+	this.len = len;
+    }
+    public double[] call() throws Exception{
+	return c.convolve(data, start, len);
+    }
 
 }
