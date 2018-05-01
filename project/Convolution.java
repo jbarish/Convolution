@@ -1,6 +1,7 @@
 package project;
 
 import java.util.*;
+
 import java.net.*;
 import java.io.*;
 import org.jtransforms.fft.DoubleFFT_1D;
@@ -11,8 +12,10 @@ public class Convolution{
     private double[] overlap;
     private int fftLen;
     private int lastOverlap;
-    double[] fftIn;
+    private paraConvolution pc;
     
+    private double[] fftIn;
+  
     public Convolution(double[] impulse){
 	this(impulse, impulse.length*2-1);
     }
@@ -31,10 +34,14 @@ public class Convolution{
 
 	fftIn= new double[fftLen];
 
-	
     }
-
-
+    public Convolution(double[] imp, int fftLen, int sampleLen, int num_threads){
+	 pc = new paraConvolution(imp, sampleLen, num_threads);
+	this.fftLen = fftLen;
+	overlap = new double[fftLen];
+	lastOverlap=0;
+	fft = new DoubleFFT_1D(fftLen);
+    }
     
     public double[] convolve(double[] input, int start, int len){
 	Arrays.fill(fftIn, 0);
@@ -88,6 +95,25 @@ public class Convolution{
 	return fftIn;
 	
     }
+
+     public double[] paraConvolve(double[] input, int start, int len)throws Exception{
+	 //compute the convolution in parallel, then just add old overlap
+	 double[] res = pc.paraConvolve(input, start, len);
+	for(int i = 0; i < lastOverlap; i++){
+	    res[i]+= overlap[i];
+	}
+	
+	for(int i = len; i < fftLen; i++){
+	    
+	    overlap[i-len] = res[i];
+	}
+	lastOverlap=fftLen-len;
+
+	return res;
+	
+    }
+
+    
     public double[] getOverlap(){
 
 	double[] temp = new double[lastOverlap];
@@ -97,7 +123,4 @@ public class Convolution{
     public int getOverlapSize(){
 	return lastOverlap;
     }
-    
-
-
 }

@@ -100,7 +100,8 @@ public class Main{
     
     public static void runLive(String[] args){
 	Audio.init();
-
+	
+	final int NUM_CONVOLVE_THREADS = 20;
 	int sampleConvolveLenNF= 5000;//impulse[0].length;
 	final int NUM_THREADS = 8; //should be datasize/sampleLen *2 (for stereo)
 	String imp;
@@ -125,7 +126,10 @@ public class Main{
 	Convolution convolvers[] = new Convolution[NUM_THREADS];
 	for(int i = 0; i < NUM_THREADS; i+=2){
 	    convolvers[i] = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1);
-	    convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1);
+	   convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1);
+
+	   // convolvers[i] = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1, sampleConvolveLen,NUM_CONVOLVE_THREADS);
+	   //convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1,sampleConvolveLen,NUM_CONVOLVE_THREADS);
 	}
 	
 
@@ -250,6 +254,7 @@ class convolver implements Callable<double[]>{
     }
     public double[] call() throws Exception{
 	return c.convolve(data, start, len);
+	//return c.paraConvolve(data, start, len);
     }
 
 }
