@@ -32,19 +32,22 @@ public class Convolution{
 	fft.realForward(impulse);
 	//yeilds fft with fftLen/2 real and fftlen/2 imag
 
-	fftIn= new double[fftLen];
+	//fftIn= new double[fftLen];
 
     }
     public Convolution(double[] imp, int fftLen, int sampleLen, int num_threads){
-	 pc = new paraConvolution(imp, sampleLen, num_threads);
-	this.fftLen = fftLen;
+	pc = new paraConvolution(imp, sampleLen, num_threads);
+
 	overlap = new double[fftLen];
-	lastOverlap=0;
 	fft = new DoubleFFT_1D(fftLen);
+	this.fftLen = fftLen;
+	lastOverlap=0;
+	
     }
     
     public double[] convolve(double[] input, int start, int len){
-	Arrays.fill(fftIn, 0);
+
+	double[] fftIn = new double[fftLen];
 	//System.out.println("Start: " + start + ", len: " + len + ", size: " + input.length);
 	System.arraycopy(input, start, fftIn, 0, len);
 	fft.realForward(fftIn);

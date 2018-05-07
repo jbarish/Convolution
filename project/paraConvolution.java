@@ -25,10 +25,14 @@ public class paraConvolution{
     
    
     public paraConvolution(double[] imp, int sampleLen, int num_threads){
+	/*calculate the number of impulse samples per thread */
 	NUM_THREADS = num_threads;
-	lenPerThread =(int) Math.ceil((double)imp.length/NUM_THREADS);
-	
-	fftLen = sampleLen + lenPerThread -1;
+	lenPerThread =(int) Math.ceil((double)imp.length/NUM_THREADS); /*need ciel to account for last bit */
+	//System.out.println("Impulse len is: " + imp.length + ", Using " + num_threads +  " threads, with " + lenPerThread + " impulse samples per thread.");
+
+	/*Calculate the FFTLen for each thread */
+	fftLen = sampleLen + lenPerThread -1; //this is per thread 
+
 	
 	overlap = new double[fftLen];
 	fft = new DoubleFFT_1D(fftLen);
@@ -41,40 +45,32 @@ public class paraConvolution{
 	for(int i =0; i < NUM_THREADS; i++){
 	    double[] temp = new double[fftLen];
 	    // System.out.println("i=" + i + ", lpt=" + lenPerThread +", implen=" + imp.length);
-	    System.arraycopy(imp, i*lenPerThread, temp, 0,
-			     (lenPerThread > imp.length-i*lenPerThread ?
-			      imp.length-i*lenPerThread : lenPerThread));
+	    // System.out.println("Copying segment of imp from " + i*lenPerThread + " to " + (i*lenPerThread+ lenPerThread) + " With len " +  (lenPerThread > imp.length-i*lenPerThread ? imp.length-i*lenPerThread : lenPerThread));
+		System.arraycopy(imp, i*lenPerThread, temp, 0,
+				 (lenPerThread > imp.length-i*lenPerThread ?
+				  imp.length-i*lenPerThread : lenPerThread));
 	    fft.realForward(temp);
 	    impulses.add(temp);
 	    
 	}
-	
+    
 	//create thread pool
 	executor = Executors.newFixedThreadPool(NUM_THREADS);
 
-	result = new double[fftLen*NUM_THREADS];
-
+	//create return array
+	result = new double[lenPerThread*NUM_THREADS + sampleLen];
+	
     }
-    
-    
-    public double[] getOverlap(){
-
-	double[] temp = new double[lastOverlap];
-	System.arraycopy(overlap,0,temp,0, lastOverlap);
-	return overlap;
-    }
-    public int getOverlapSize(){
-	return lastOverlap;
-    }
-
-
 
 
     public double[] paraConvolve(double[] input, int start, int len) throws Exception{
 	Arrays.fill(fftIn, 0);
+	//      fftIn= new double[fftLen];
 	Arrays.fill(overlap,0);
+	//	overlap = new double[fftLen];
 	lastOverlap = 0;
-	Arrays.fill(result, 0);
+	//	Arrays.fill(result, 0);
+	result = new double[fftLen*NUM_THREADS];
 	
 	//System.out.println("Start: " + start + ", len: " + len + ", size: " + input.length);
 	System.arraycopy(input, start, fftIn, 0, len);
@@ -88,17 +84,19 @@ public class paraConvolution{
 	List<Future<double[]>> results = null;
 	results = executor.invokeAll(threads);
 	int j = 0;
+	int oLen =lenPerThread;
 	for(Future<double[]> f : results){
 	    double[] temp = f.get();
 	    for(int i = 0; i < lastOverlap; i++){
 		temp[i]+= overlap[i];
 	    }
-	    
-	    for(int i = len; i < fftLen; i++){
+	   
+	    for(int i = oLen; i < fftLen; i++){
 		
-		overlap[i-len] = temp[i];
+		overlap[i-oLen] = temp[i];
 	    }
-	    lastOverlap=fftLen-len;
+	    lastOverlap=fftLen-oLen;
+
 	    System.arraycopy(temp, 0, result, j*lenPerThread, fftLen);
 	    j++;
 	}

@@ -73,6 +73,10 @@ public class Main{
 		writeMutex.acquire();
 		writeMutex.acquire();
 		Audio.write(convolvedLeft,convolvedRight, sampleConvolveLen);
+		for(int j=0; j < sampleConvolveLen; j++){
+		    Audio.writeToFile(convolvedLeft[j], "out.wav");
+		    Audio.writeToFile(convolvedRight[j], "out.wav");
+		}
 		writeMutex.release();
 		writeMutex.release();
 	    }catch (InterruptedException ie){
@@ -97,11 +101,17 @@ public class Main{
 
 
 
-    
-    public static void runLive(String[] args){
+    public static void localEcho(){
 	Audio.init();
+	while(true){
+	    double[][] d = Audio.read().data;
+	    Audio.write(d[0], d[1], d[0].length);
+	}
+    }
+    public static void runLive(String[] args){
+
 	
-	final int NUM_CONVOLVE_THREADS = 20;
+	final int NUM_CONVOLVE_THREADS = 40;
 	int sampleConvolveLenNF= 5000;//impulse[0].length;
 	final int NUM_THREADS = 8; //should be datasize/sampleLen *2 (for stereo)
 	String imp;
@@ -120,27 +130,28 @@ public class Main{
 	final int sampleConvolveLen = sampleConvolveLenNF;
 
 
-	System.out.println("Using a convolution length of " + sampleConvolveLen);
+	System.out.println("Using a convolution length of " + sampleConvolveLen + " with " + NUM_CONVOLVE_THREADS + " threads");
 
 	//create an array of all convolving objects
 	Convolution convolvers[] = new Convolution[NUM_THREADS];
 	for(int i = 0; i < NUM_THREADS; i+=2){
-	    convolvers[i] = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1);
-	   convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1);
+	    //convolvers[i] = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1);
+	     //convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1);
 
-	   // convolvers[i] = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1, sampleConvolveLen,NUM_CONVOLVE_THREADS);
-	   //convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1,sampleConvolveLen,NUM_CONVOLVE_THREADS);
+	    convolvers[i] = new Convolution(impulse[0], impulse[0].length + sampleConvolveLen -1, sampleConvolveLen,NUM_CONVOLVE_THREADS);
+	    convolvers[i+1] = new Convolution(impulse[1], impulse[0].length + sampleConvolveLen -1,sampleConvolveLen,NUM_CONVOLVE_THREADS);
 	}
 	
 
 	//create our executor
 	ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
 	double[][] leftOver = null;
-	    
+	Audio.init();
 	while (true){
-	    
-	    double[][] d = Audio.read();
-	     int len = d[0].length;
+	    long startTime = System.nanoTime();
+	    SoundInfo si = Audio.read();
+	    double[][] d = si.data;
+	    int len = d[0].length;
 	    List<double[]> lefts = new ArrayList<double[]>();
 	    List<double[]> rights = new ArrayList<double[]>();
 
@@ -153,6 +164,8 @@ public class Main{
 		System.arraycopy(d[1],0,d1[1], leftOver[1].length, len);
 		d = d1;
 		len = d[0].length; //reset since it was updated
+		//System.out.println("Len = " + len);
+		System.out.println("Copyint!");
 	    }
 
 	    
@@ -161,9 +174,9 @@ public class Main{
 		List<convolver> threads = new ArrayList<convolver>();
 		List<Future<double[]>> results = null;
 		int numThreadsNeeded = ((int)(len/sampleConvolveLen))*2;//*2 for stereo
-
-		//save left over for next time (things not even multiple of sampleConvolveLen
-		if(len%sampleConvolveLen != 0){
+		//System.out.println("NTN: " + numThreadsNeeded + " len = " + len);
+		/*save any leftover */
+		if(len%sampleConvolveLen != 0 && numThreadsNeeded!=0){
 		    leftOver = new double[2][len%sampleConvolveLen];
 		    System.arraycopy(d[0],sampleConvolveLen*(numThreadsNeeded/2),
 				     leftOver[0], 0, len%sampleConvolveLen);
@@ -174,49 +187,44 @@ public class Main{
 		}else{
 		    leftOver = null;
 		}
-		/*create all of our threads */
-		for(int i = 0; i < numThreadsNeeded; i+=2){
-		    threads.add(new convolver(d[0], convolvers[i],sampleConvolveLen*(i/2), sampleConvolveLen));
-		    threads.add(new convolver(d[1], convolvers[i+1],sampleConvolveLen*(i/2), sampleConvolveLen));
+		int convolveLen = sampleConvolveLen;
+		if( numThreadsNeeded < 1 && len>0){
+		    numThreadsNeeded = 2;
+		    convolveLen = len;
 		}
-		/*run our convolution in parallel */
-		results = executor.invokeAll(threads);
-		/*get the results from all of the runs */
-		int i = 0;
-		for(Future<double[]> f : results){
-		    if(i%2==0){
-			lefts.add(f.get());
-		    }else{
-			rights.add(f.get());
+		if(numThreadsNeeded > 0){
+		    
+		    
+		    //save left over for next time (things not even multiple of sampleConvolveLen
+		    
+		    /*create all of our threads */
+		    for(int i = 0; i < numThreadsNeeded; i+=2){
+			threads.add(new convolver(d[0], convolvers[i],convolveLen*(i/2), convolveLen));
+			threads.add(new convolver(d[1], convolvers[i+1],convolveLen*(i/2), convolveLen));
 		    }
-		    i++;
+		    /*run our convolution in parallel */
+		    results = executor.invokeAll(threads);
+		    //lefts.add(convolvers[0].convolve(d[0], 0, sampleConvolveLen));
+		    /*get the results from all of the runs */
+		    int i = 0;
+		    for(Future<double[]> f : results){
+			if(i%2==0){
+			    lefts.add(f.get());
+			}else{
+			    rights.add(f.get());
+			}
+			i++;
+		    }
+		    /*write it to the sound card */
+		   
+		    long endTime = System.nanoTime();
+
+		    long duration = (endTime - startTime);
+		    Audio.write(lefts, rights, convolveLen, si.ts);
+		    System.out.println("Convolving with length " + convolveLen + " took: " + duration/1000000.0 + "ms");
+		   
 		}
-		/*write it to the sound card */
-		Audio.write(lefts, rights, sampleConvolveLen);
-
-		/*
-	    writeMutex.acquire();
-	     new Thread()
-	     {
-		 public void run() {
-		     setCL(cLeft.convolve(d[0], 0, len));
-		     writeMutex.release();
-		 }
-	     }.start();
-	     writeMutex.acquire();
-	      new Thread()
-	     {
-		 public void run() {
-		     setCR(cRight.convolve(d[1], 0, len));
-		      writeMutex.release();
-		 }
-	     }.start();
-
-	      writeMutex.acquire();
-	      writeMutex.acquire();
-	      Audio.write(convolvedLeft,convolvedRight, sampleConvolveLen);
-	      writeMutex.release();
-	      writeMutex.release();*/
+		
 	    }catch (InterruptedException ie ){
 		ie.printStackTrace();
 	    }catch(ExecutionException ex){
@@ -232,9 +240,10 @@ public class Main{
 	*/
     }
     public static void main (String [] args){
-	//	runFromFile(args);
-	runLive(args);
-	Audio.echo();
+		runFromFile(args);
+		//	runLive(args);
+	//localEcho();
+	//Audio.echo();
 
     }
 
@@ -253,8 +262,8 @@ class convolver implements Callable<double[]>{
 	this.len = len;
     }
     public double[] call() throws Exception{
-	return c.convolve(data, start, len);
-	//return c.paraConvolve(data, start, len);
+	//return c.convolve(data, start, len);
+	return c.paraConvolve(data, start, len);
     }
 
 }

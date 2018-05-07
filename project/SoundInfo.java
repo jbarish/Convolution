@@ -1,9 +1,9 @@
 package project;
 public class SoundInfo{
     public double[][] data;
-    public int count;
-    public SoundInfo(double[][] _data, int _count){
+    public long ts;
+    public SoundInfo(double[][] _data, long _ts){
 	data = _data;
-	count = _count;
+	ts = _ts;
     }
 }

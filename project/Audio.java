@@ -54,7 +54,7 @@ public class Audio{
            
             buffer = new byte[SAMPLE_BUFFER_SIZE];
 	    outputBuffer = new byte[OUTPUT_BUFFER_SIZE*BYTES_PER_SAMPLE];
-	    outputBufferDouble = new double[OUTPUT_BUFFER_SIZE];
+	    outputBufferDouble = new double[1000000];
         } catch (Exception e) {
             System.out.println(e.getMessage());
 	    return 1;
@@ -66,12 +66,25 @@ public class Audio{
     }
 
     //read in as much as possible, up to SAMPLE_BUFFER_SIZE
-    public static double[][] read(){
-
-	System.out.print("TGT:" + tgtLine.available());
+    //    public static double[][] read(){
+    public static SoundInfo read(){
+	boolean print = false;
+	if(tgtLine.available()>0){
+	    System.out.print("TGT:" + tgtLine.available());
+	    print = true;
+	    
+	}
 	//makes use of existing buffer
 	int cnt = tgtLine.read(buffer, 0, buffer.length < tgtLine.available() ? buffer.length : tgtLine.available());
-	System.out.println( ", Read: " + cnt);
+
+	long startTime = System.nanoTime();
+	if(cnt ==0){
+	    //	    return new double[2][0];
+	    return new SoundInfo(new double[2][0], startTime);
+	}
+	if(cnt>0)
+	    System.out.println( ", Read: " + cnt);
+        
 	int bits = getAudioFormat().getSampleSizeInBits();
 	if(bits !=  BITS_PER_SAMPLE){
 	    throw new RuntimeException("Invalid bit rate. Expected " + BITS_PER_SAMPLE +", found " + bits);
@@ -107,20 +120,11 @@ public class Audio{
 	    }
 	    out[1][j]=samples[i];
 	}
-	return out;
+
+	return new SoundInfo(out, startTime);
     }
     
-    public static void  write( byte[] in, int count){
-	/*if(srcLine.available() > 10000){
-	    System.out.println(srcLine.available());
-	    }*/
-	//amount to write must be integer multiple of frame size
-	if(count%BYTES_PER_SAMPLE==0){
-	    srcLine.write(in, 0, count);
-	}else{
-	    srcLine.write(in, 0, count-(count%BYTES_PER_SAMPLE));
-	}
-    }
+  
 
     
 
@@ -133,9 +137,9 @@ public class Audio{
     //operates on it's own thread
     public static void  write( double[] inLeft, double[] inRight, int count){
 	try{
-	    if(srcLine.available() > 10000){
+	    /*if(srcLine.available() > 10000){
 		System.out.println(srcLine.available());
-	    }
+		}*/
 	    writeMutex.acquire(); //grab the right to write to the sound card
 	    new Thread()
 	    {
@@ -190,88 +194,90 @@ public class Audio{
 
 
 
-
+    public static void  write( List<double[]> lefts, List<double[]> rights, int count){
+	write(lefts, rights, count, 0);
+    }
     //write an array of doubles to the sound card, in stereo format
     //operates on it's own thread
-    public static void  write( List<double[]> lefts, List<double[]> rights, int count){
-	try{
-	    if(srcLine.available() > 10000){
-		System.out.println(srcLine.available());
-	    }
-	    writeMutex.acquire(); //grab the right to write to the sound card
+    public static void  write( List<double[]> lefts, List<double[]> rights, int count, long startTime){
+
+	    
 	    new Thread()
 	    {
 		public void run() {
-		    for(int j = 0; j < lefts.size(); j++){
-			double[] inLeft = lefts.get(j);
-			double[] inRight = lefts.get(j);
-			for(int i = 0; i < count; i++){
-
-			    //clamp all samples to -1 to 1
-			    if(inLeft[i] > 1){
-				inLeft[i] =1;
-			    }
-			    if(inLeft[i] < -1){
-				inLeft[i] = -1;
-			    }
-
-			    //if stereo, also clamp right channel
-			    if(inRight != null){
-				if(inRight[i] > 1){
-				    inRight[i] =1;
+		    try{
+			writeMutex.acquire(); //grab the right to write to the sound card
+			for(int j = 0; j < lefts.size(); j++){
+			    double[] inLeft = lefts.get(j);
+			    double[] inRight = lefts.get(j);
+			    for(int i = 0; i < count; i++){
+				
+				//clamp all samples to -1 to 1
+				if(inLeft[i] > 1){
+				    inLeft[i] =1;
 				}
-				if(inRight[i] < -1){
-				    inRight[i] = -1;
+				if(inLeft[i] < -1){
+				    inLeft[i] = -1;
 				}
-			    }
-
-			    //convert to bytes and write out
-			    short s = (short) (MAX_16_BIT*inLeft[i]);
-			    byte b = (byte)s;
-			    write(b);
-			    b= (byte) (s >> 8);
-			    write(b);
-			
-			    if(inRight != null){
-				s = (short) (MAX_16_BIT*inRight[i]);
-				b = (byte)s;
+				
+				//if stereo, also clamp right channel
+				if(inRight != null){
+				    if(inRight[i] > 1){
+					inRight[i] =1;
+				    }
+				    if(inRight[i] < -1){
+					inRight[i] = -1;
+				    }
+				}
+				
+				//convert to bytes and write out
+				short s = (short) (MAX_16_BIT*inLeft[i]);
+				byte b = (byte)s;
 				write(b);
 				b= (byte) (s >> 8);
 				write(b);
+				
+				if(inRight != null){
+				    s = (short) (MAX_16_BIT*inRight[i]);
+				    b = (byte)s;
+				    write(b);
+				    b= (byte) (s >> 8);
+				    write(b);
+				}
+				
 			    }
-			
+			    flush();
+			    long endTime = System.nanoTime();
+			    long duration = (endTime - startTime);
+			    System.out.println("Total Packet Len took: " + duration/1000000.0 + "ms");
 			}
+		    }
+		    catch (InterruptedException ie){
 			
+			ie.printStackTrace();
 		    }
 		    writeMutex.release(); //release the sound card
 		    return;
 		}
 	    }.start();
 	    
-	}
-	catch (InterruptedException ie){
-	    ie.printStackTrace();
-	}
-	
     }
-
-
-    //write a double to sound card
-    public static void write(double d){
-
-
-	//if we can, add byte to our internal buffer
-	if(bufferCounterDouble < outputBufferDouble.length){
-	    outputBufferDouble[bufferCounterDouble] = d;
-	    bufferCounterDouble++;
+    
+    
+    public static void  write( byte[] in, int count){
+	/*if(srcLine.available() > 10000){
+	    System.out.println(srcLine.available());
+	    }*/
+	//amount to write must be integer multiple of frame size
+	if(count%BYTES_PER_SAMPLE==0){
+	    srcLine.write(in, 0, count);
+	}else{
+	    srcLine.write(in, 0, count-(count%BYTES_PER_SAMPLE));
 	}
+  }
 
-	//when buffer is full, send to soundcard
-	if (bufferCounterDouble == outputBufferDouble.length){
-	    write(outputBufferDouble, bufferCounterDouble);
-	    bufferCounterDouble = 0;
-	}
-    }
+
+   
 
      //write a byte to sound card
     public static void write(byte b){
@@ -399,6 +405,63 @@ public class Audio{
 	}
 	return out;
     }
+
+    public static void writeToFile(double d, String fileName){
+	saveToFile(d, fileName);
+    }
+
+    
+    public static void saveToFile(double d, String fileName){
+	
+	//if we can, add byte to our internal buffer
+	if(bufferCounterDouble < outputBufferDouble.length){
+	    outputBufferDouble[bufferCounterDouble] = d;
+	    bufferCounterDouble++;
+	    System.out.println(bufferCounterDouble);
+	}
+	
+	//when buffer is full, send to soundcard
+	if (bufferCounterDouble == outputBufferDouble.length){
+	    saveToFile(outputBufferDouble, bufferCounterDouble, fileName);
+	    bufferCounterDouble = 0;
+	}
+    }
+
+
+    // save double array as .wav 
+    public static void saveToFile(double[] input, int len, String filename) {
+
+        // assumes 44,100 samples per second
+        // use 16-bit audio, mono, signed PCM, little Endian
+        AudioFormat format =getAudioFormat();
+        byte[] data = new byte[2 * len];
+        for (int i = 0; i < len; i++) {
+            int temp = (short) (input[i] * MAX_16_BIT);
+            data[2*i + 0] = (byte) temp;
+            data[2*i + 1] = (byte) (temp >> 8);
+        }
+
+        // now save the file
+        try {
+            ByteArrayInputStream bais = new ByteArrayInputStream(data);
+            AudioInputStream ais = new AudioInputStream(bais, format, len);
+            if (filename.endsWith(".wav") || filename.endsWith(".WAV")) {
+                AudioSystem.write(ais, AudioFileFormat.Type.WAVE, new File(filename));
+		System.out.println("Done!");
+		System.exit(1);
+            }
+            else {
+                throw new RuntimeException("File format not supported: " + filename);
+            }
+        }
+        catch (Exception e) {
+            System.out.println(e);
+            System.exit(1);
+        }
+    }
+
+
+
     
     public static int disconnect(){
 	try{
@@ -414,37 +477,7 @@ public class Audio{
 	return 0;
     }
 
-    //test out the fft
-    public static void fftTest(){
-	double[] input = {0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,0};
-	
-        DoubleFFT_1D fftDo = new DoubleFFT_1D(input.length);
-        double[] fft = new double[input.length];
-	double[] fft2 = new double[input.length*2];
-        System.arraycopy(input, 0, fft2, 0, input.length);
-      
-	
-	/*fftDo.realForwardFull(fft2);
-	for(double d: fft2) {
-            System.out.println(d);
-	    }*/
-	System.arraycopy(input, 0, fft, 0, input.length);
-	fftDo.realForward(fft);
-	System.out.println("------------------");
-        for(double d: fft) {
-            System.out.println(d);
-        }
-
-	fftDo.realInverse(fft, false);
-	System.out.println("------------------");
-        for(double d: fft) {
-            System.out.println(d);
-        }
-
-    }
-    public static void main(String[] args){
-	fftTest();
-    }
+ 
   
 }
 
